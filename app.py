@@ -86,13 +86,6 @@ with tab_analise:
         # Mostra imagem com preview responsivo
         st.image(imagem, use_container_width=True)
         
-        # Tipo de análise (simplificado para mobile)
-        tipo_analise = st.selectbox(
-            "Tipo de análise:",
-            ["Rápida", "Completa"],
-            help="Escolha análise rápida para resultados imediatos"
-        )
-        
         # Botão de análise
         if st.button(" Analisar", use_container_width=True):
             with st.spinner("Analisando..."):
@@ -102,7 +95,7 @@ with tab_analise:
                     
                     # Análise com Gemini
                     response = model.generate_content(
-                        contents=[PROMPTS[tipo_analise], img],
+                        contents=[PROMPTS['default'], img],
                         generation_config={
                             'temperature': 0.1,
                             'top_p': 0.8,

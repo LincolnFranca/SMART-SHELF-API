@@ -1,37 +1,23 @@
-ANALISE_RAPIDA = """
-Analise esta prateleira e os produtos específicos listados abaixo. Responda em português:
+ANALISE = """
+Analise esta prateleira e forneça uma resposta em português seguindo EXATAMENTE o formato abaixo:
 
-1. Para cada produto listado:
-   - Presença na prateleira (Sim/Não)
-   - Quantidade aproximada
-   - Estado de organização
-   - Necessidade de reposição
+CRITÉRIOS DE VALIDAÇÃO:
+1. Nome e logo visíveis: [Verdadeiro/Falso]
+2. Preço do produto visível: [Verdadeiro/Falso]
+3. Marcas concorrentes sem destaque: [Verdadeiro/Falso]
+4. Disposição organizada e visualmente agradável: [Verdadeiro/Falso]
 
-2. Geral da prateleira:
-   - Ocupação total (%)
-   - Principais problemas (máx 2)
-   - Ação mais urgente
+[Se todos os critérios forem Verdadeiro, responder apenas:]
+Validada com sucesso
+
+[Se algum critério for Falso, responder:]
+Validação pendente
+
+Dicas para melhoria:
+- [Lista de sugestões específicas para cada critério não atendido]
 """
 
-ANALISE_COMPLETA = """
-Faça uma análise detalhada da prateleira e dos produtos específicos listados abaixo. Responda em português:
-
-1. Análise individual dos produtos:
-   - Localização na prateleira
-   - Quantidade e disposição
-   - Estado de conservação
-   - Visibilidade para o cliente
-   - Sugestões de melhoria
-
-2. Análise geral da prateleira:
-   - Ocupação e organização
-   - Problemas encontrados
-   - Ações necessárias
-   - Sugestões de layout
-"""
-
-# Dicionário com todos os prompts para fácil acesso
+# Dicionário com o prompt para fácil acesso
 PROMPTS = {
-    'Rápida': ANALISE_RAPIDA,
-    'Completa': ANALISE_COMPLETA
+    'default': ANALISE
 }

@@ -57,8 +57,7 @@ def save_config(config):
 @app.post("/analyze", response_model=AnalysisResponse)
 async def analyze_shelf(
     file: UploadFile = File(...),
-    produtos: str = Form(...),  # JSON string com lista de produtos
-    analysis_type: Literal["Rápida", "Completa"] = "Rápida"
+    produtos: str = Form(...)  # JSON string com lista de produtos
 ):
     try:
         # Verificar se o arquivo é uma imagem
@@ -83,7 +82,7 @@ async def analyze_shelf(
         image = Image.open(io.BytesIO(image_data))
         
         # Preparar o prompt com os produtos
-        prompt = f"{PROMPTS[analysis_type]}\n\nProdutos a serem analisados:\n{produtos_texto}"
+        prompt = f"{PROMPTS['default']}\n\nProdutos a serem analisados:\n{produtos_texto}"
         
         # Realizar análise
         response = model.generate_content(
