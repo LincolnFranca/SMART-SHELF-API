@@ -94,6 +94,56 @@ async function getStats() {
 }
 ```
 
+### 3. Logs (`/logs`)
+- **Método**: GET
+- **URL**: `https://smart-shelf-api.onrender.com/logs`
+
+**Exemplo de uso**:
+```javascript
+async function getLogs() {
+    try {
+        const response = await fetch('https://smart-shelf-api.onrender.com/logs');
+        const logs = await response.json();
+        return logs;
+    } catch (error) {
+        console.error('Erro:', error);
+    }
+}
+```
+
+### 4. Exportar para Google Sheets (`/export-to-sheets`)
+- **Método**: POST
+- **URL**: `https://smart-shelf-api.onrender.com/export-to-sheets`
+- **Parâmetros**: `spreadsheet_id` (ID da planilha do Google Sheets)
+
+**Exemplo de uso**:
+```javascript
+async function exportToSheets(spreadsheetId) {
+    try {
+        const response = await fetch(`https://smart-shelf-api.onrender.com/export-to-sheets?spreadsheet_id=${spreadsheetId}`, {
+            method: 'POST'
+        });
+        const result = await response.json();
+        return result;
+    } catch (error) {
+        console.error('Erro:', error);
+    }
+}
+
+// O ID da planilha pode ser encontrado na URL do Google Sheets:
+// https://docs.google.com/spreadsheets/d/SEU_ID_AQUI/edit
+const spreadsheetId = 'seu_id_da_planilha';
+exportToSheets(spreadsheetId).then(result => {
+    console.log(`${result.rows_updated} linhas exportadas com sucesso!`);
+});
+```
+
+## Variáveis de Ambiente Necessárias
+- `GOOGLE_API_KEY`: Chave da API do Google Gemini
+- `SUPABASE_URL`: URL do projeto Supabase
+- `SUPABASE_KEY`: Chave da API do Supabase
+- `GOOGLE_SHEETS_CREDS`: Credenciais da conta de serviço do Google Sheets (JSON)
+
 ## Tipos de Análise
 
 ### Análise Rápida

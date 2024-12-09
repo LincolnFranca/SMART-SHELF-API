@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
 import google.generativeai as genai
 from PIL import Image
@@ -133,9 +133,17 @@ async def analyze_shelf(
         )
         raise
 
-@app.post("/export-to-sheets")
-async def export_to_sheets(spreadsheet_id: str):
-    """Exporta os logs para uma planilha Google Sheets"""
+@app.post("/export-to-sheets", response_model=dict)
+async def export_to_sheets(spreadsheet_id: str = Query(..., description="ID da planilha do Google Sheets para exportar os logs")):
+    """
+    Exporta os logs de análise para uma planilha do Google Sheets.
+    
+    - **spreadsheet_id**: ID da planilha (encontrado na URL do Google Sheets)
+    
+    Retorna:
+    - **message**: Mensagem de sucesso
+    - **rows_updated**: Número de linhas atualizadas
+    """
     try:
         # Buscar logs do Supabase
         response = supabase.table('analysis_logs').select('*').order('timestamp', desc=True).execute()
