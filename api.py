@@ -26,7 +26,7 @@ class Produto(BaseModel):
 
 class AnalysisResponse(BaseModel):
     status: str
-    details: str
+    details: dict
     execution_time: float
     cost: float
 
@@ -152,10 +152,14 @@ async def analyze_shelf(
         # Preparar a imagem para o Gemini
         image_parts = [{"mime_type": "image/jpeg", "data": image_data}]
         
+        # Formatar o prompt com os produtos
+        produtos_nomes = ", ".join([p['nome'] for p in produtos_list])
+        prompt_formatado = PROMPTS['default'].format(produtos=produtos_nomes)
+        
         # Fazer a análise com timeout aumentado
         response = await asyncio.wait_for(
             model.generate_content_async(
-                contents=[PROMPTS['default'], image_parts[0]],
+                contents=[prompt_formatado, image_parts[0]],
                 generation_config={
                     'temperature': 0.1,
                     'top_p': 0.8,
@@ -171,12 +175,24 @@ async def analyze_shelf(
         
         if "Validada com sucesso" in response_text:
             status = "success"
-            details = response_text.split("Motivos da aprovação:")[1].strip() if "Motivos da aprovação:" in response_text else "Análise aprovada"
+            validation_text = response_text.split("Validação dos critérios:")[1].split("Motivos da aprovação:")[0].strip()
+            details_text = response_text.split("Motivos da aprovação:")[1].strip()
+            details = {
+                "status": "success",
+                "validation": validation_text,
+                "details": details_text,
+                "raw_response": response_text
+            }
         else:
             status = "pending"
-            validation = response_text.split("Validação dos critérios:")[1].split("Dicas para melhoria:")[0].strip()
+            validation_text = response_text.split("Validação dos critérios:")[1].split("Dicas para melhoria:")[0].strip()
             tips = response_text.split("Dicas para melhoria:")[1].strip()
-            details = f"Validação:\n{validation}\n\nMelhorias necessárias:\n{tips}"
+            details = {
+                "status": "pending",
+                "validation": validation_text,
+                "improvements": tips,
+                "raw_response": response_text
+            }
         
         # Preparar resposta
         result = {
@@ -211,14 +227,14 @@ async def analyze_shelf(
         
         raise HTTPException(status_code=500, detail=error_msg)
 
-def save_log(status: str, produtos: list, execution_time: float = 0, cost: float = 0, error: str = None, analysis_details: str = None):
+def save_log(status: str, produtos: list, execution_time: float = 0, cost: float = 0, error: str = None, analysis_details: dict = None):
     """Salva o log da análise no Supabase"""
     data = {
         "status": status,
         "produtos": json.dumps(produtos),
         "execution_time": execution_time,
         "cost": cost,
-        "analysis_details": analysis_details
+        "analysis_details": json.dumps(analysis_details) if analysis_details else None
     }
     
     if error:
