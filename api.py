@@ -48,10 +48,12 @@ genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
 model = genai.GenerativeModel('gemini-1.5-pro-latest')
 
 # Rota raiz
-@app.get("/")
-def read_root():
+@app.get("/", include_in_schema=True)
+@app.head("/", include_in_schema=True)
+async def read_root():
+    """Rota raiz que retorna informações básicas sobre a API"""
     return {
-        "message": "Bem-vindo à Smart Shelf API!",
+        "message": "Bem-vindo à Smart Shelf API",
         "version": "1.0.0",
         "documentation": "/docs",
         "endpoints": {
