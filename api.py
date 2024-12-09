@@ -47,6 +47,21 @@ app.add_middleware(
 genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
 model = genai.GenerativeModel('gemini-1.5-pro-latest')
 
+# Rota raiz
+@app.get("/")
+def read_root():
+    return {
+        "message": "Bem-vindo à Smart Shelf API!",
+        "version": "1.0.0",
+        "documentation": "/docs",
+        "endpoints": {
+            "analyze_shelf": "/analyze",
+            "export_to_sheets": "/export-to-sheets",
+            "get_stats": "/stats",
+            "get_logs": "/logs"
+        }
+    }
+
 # Configuração Supabase
 supabase = create_client(
     os.environ.get("SUPABASE_URL", "sua_url"),
