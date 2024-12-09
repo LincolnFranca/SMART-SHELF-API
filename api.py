@@ -1,5 +1,7 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Query
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 import google.generativeai as genai
 from PIL import Image
 import io
@@ -15,7 +17,6 @@ from supabase import create_client
 from google.oauth2.credentials import Credentials
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from fastapi.responses import JSONResponse
 import asyncio
 
 # Classes para requisição e resposta
@@ -35,6 +36,25 @@ app = FastAPI(
     description="API para análise de prateleiras usando IA",
     version="1.0.0"
 )
+
+# Handler para erros de validação
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    print("\n=== Erro de Validação ===")
+    print(f"URL: {request.url}")
+    print(f"Método: {request.method}")
+    print("Headers:", dict(request.headers))
+    print("Detalhes do erro:", exc.errors())
+    print("Corpo da requisição:", await request.body())
+    print("=== Fim do Erro ===\n")
+    
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": exc.errors(),
+            "body": str(await request.body())
+        }
+    )
 
 # Configuração CORS
 app.add_middleware(
@@ -80,6 +100,7 @@ sheets_service = build('sheets', 'v4', credentials=credentials)
 
 @app.post("/analyze", response_model=AnalysisResponse)
 async def analyze_shelf(
+    request: Request,
     image: UploadFile = File(...),
     produtos: str = Form(...)  # JSON string com lista de produtos
 ):
@@ -89,19 +110,26 @@ async def analyze_shelf(
     - image: arquivo de imagem
     - produtos: string JSON no formato '[{"nome": "Produto 1", "descricao": "Descrição 1"}]'
     """
-    print("\n=== Dados Recebidos ===")
+    print("\n=== Dados da Requisição ===")
+    print(f"URL: {request.url}")
+    print(f"Método: {request.method}")
+    print("Headers:", dict(request.headers))
+    print("Body:", await request.body())
+    
+    print("\n=== Dados do Arquivo ===")
     print(f"Tipo do arquivo: {image.content_type}")
     print(f"Nome do arquivo: {image.filename}")
     print(f"Tamanho do arquivo: {len(await image.read())} bytes")
     # Retornar o cursor para o início do arquivo após ler
     await image.seek(0)
     
-    print("\nProdutos recebidos (raw):", produtos)
+    print("\n=== Dados dos Produtos ===")
+    print("Produtos (raw):", produtos)
     try:
         produtos_parsed = json.loads(produtos)
-        print("\nProdutos parseados:", json.dumps(produtos_parsed, indent=2, ensure_ascii=False))
+        print("Produtos (parsed):", json.dumps(produtos_parsed, indent=2, ensure_ascii=False))
     except Exception as e:
-        print("\nErro ao parsear produtos:", str(e))
+        print("Erro ao parsear produtos:", str(e))
     
     print("\n=== Fim dos Dados ===\n")
     
