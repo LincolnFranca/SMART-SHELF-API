@@ -129,14 +129,14 @@ async def analyze_shelf(
         # Determinar status e detalhes
         if "Validada com sucesso" in response_text:
             status = "success"
-            # Extrair o texto após "Motivos:" até o final
-            details = response_text.split("Motivos:")[1].strip()
+            # Extrair o texto após "Motivos da aprovação:" até a próxima linha em branco
+            details = response_text.split("Motivos da aprovação:")[1].strip()
         else:
             status = "pending"
-            # Extrair problemas encontrados e sugestões
-            problems = response_text.split("Problemas encontrados:")[1].split("Sugestões de melhoria:")[0].strip()
-            suggestions = response_text.split("Sugestões de melhoria:")[1].strip()
-            details = f"Problemas: {problems}\nSugestões: {suggestions}"
+            # Extrair validação dos critérios e dicas
+            validation = response_text.split("Validação dos critérios:")[1].split("Dicas para melhoria:")[0].strip()
+            tips = response_text.split("Dicas para melhoria:")[1].strip()
+            details = f"Validação:\n{validation}\n\nMelhorias necessárias:\n{tips}"
         
         execution_time = time.time() - start_time
         cost = 0.0005  # Custo fixo por análise
