@@ -163,22 +163,18 @@ async def export_to_sheets(spreadsheet_id: str = Query(..., description="ID da p
     """
     try:
         # Buscar logs do Supabase
-        response = supabase.table('analysis_logs').select('*').order('timestamp', desc=True).execute()
+        response = supabase.table('analysis_logs').select('*').order('id', desc=True).execute()
         logs = response.data
 
         # Preparar dados para a planilha
-        header = [['Data/Hora', 'Status', 'Produtos', 'Tempo de Execução (s)', 'Custo ($)', 'Erro']]
+        header = [['ID', 'Status', 'Produtos', 'Tempo de Execução (s)', 'Custo ($)', 'Erro']]
         rows = []
         for log in logs:
             # Formatar produtos como string
-            produtos_str = ', '.join(log['produtos']) if log['produtos'] else ''
-            
-            # Formatar timestamp
-            timestamp = datetime.fromisoformat(log['timestamp'].replace('Z', '+00:00'))
-            formatted_date = timestamp.strftime('%d/%m/%Y %H:%M:%S')
+            produtos_str = log['produtos'] if isinstance(log['produtos'], str) else json.dumps(log['produtos'])
             
             row = [
-                formatted_date,
+                str(log['id']),
                 log['status'],
                 produtos_str,
                 f"{log['execution_time']:.2f}" if log['execution_time'] else '',
@@ -286,16 +282,31 @@ async def get_stats():
     }
 
 @app.get("/logs")
-async def get_logs(limit: int = 10, status: str = None):
+async def get_logs(limit: int = 10):
     """Retorna os últimos logs de análise"""
-    query = supabase.table('analysis_logs').select('*')
-    
-    if status:
-        query = query.eq('status', status)
-    
-    response = query.order('timestamp', desc=True).limit(limit).execute()
-    
-    return {"logs": response.data}
+    try:
+        query = supabase.table('analysis_logs').select('*')
+        response = query.order('id', desc=True).limit(limit).execute()
+        logs = response.data
+
+        # Formatar logs para exibição
+        formatted_logs = []
+        for log in logs:
+            produtos_str = log['produtos'] if isinstance(log['produtos'], str) else json.dumps(log['produtos'])
+            
+            formatted_log = {
+                'id': log['id'],
+                'status': log['status'],
+                'produtos': produtos_str,
+                'execution_time': f"{log['execution_time']:.2f}" if log['execution_time'] else '',
+                'cost': f"${log['cost']:.4f}" if log['cost'] else '',
+                'error': log['error'] if log['error'] else ''
+            }
+            formatted_logs.append(formatted_log)
+
+        return formatted_logs
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao buscar logs: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
