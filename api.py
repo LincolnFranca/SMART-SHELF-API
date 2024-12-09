@@ -24,9 +24,10 @@ class Produto(BaseModel):
     descricao: str
 
 class AnalysisResponse(BaseModel):
-    analysis: str
-    cost: float
+    status: str
+    details: str
     execution_time: float
+    cost: float
 
 # Inicialização da API
 app = FastAPI(
