@@ -12,6 +12,10 @@ import json
 from datetime import datetime
 import time
 from supabase import create_client
+from google.oauth2.credentials import Credentials
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from fastapi.responses import JSONResponse
 
 # Classes para requisição e resposta
 class Produto(BaseModel):
@@ -48,6 +52,12 @@ supabase = create_client(
     os.environ.get("SUPABASE_URL", "sua_url"),
     os.environ.get("SUPABASE_KEY", "sua_key")
 )
+
+# Configuração Google Sheets
+SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
+GOOGLE_SHEETS_CREDS = json.loads(os.environ.get('GOOGLE_SHEETS_CREDS', '{}'))
+credentials = service_account.Credentials.from_service_account_info(GOOGLE_SHEETS_CREDS, scopes=SCOPES)
+sheets_service = build('sheets', 'v4', credentials=credentials)
 
 @app.post("/analyze", response_model=AnalysisResponse)
 async def analyze_shelf(
@@ -122,6 +132,96 @@ async def analyze_shelf(
             execution_time=execution_time
         )
         raise
+
+@app.post("/export-to-sheets")
+async def export_to_sheets(spreadsheet_id: str):
+    """Exporta os logs para uma planilha Google Sheets"""
+    try:
+        # Buscar logs do Supabase
+        response = supabase.table('analysis_logs').select('*').order('timestamp', desc=True).execute()
+        logs = response.data
+
+        # Preparar dados para a planilha
+        header = [['Data/Hora', 'Status', 'Produtos', 'Tempo de Execução (s)', 'Custo ($)', 'Erro']]
+        rows = []
+        for log in logs:
+            # Formatar produtos como string
+            produtos_str = ', '.join(log['produtos']) if log['produtos'] else ''
+            
+            # Formatar timestamp
+            timestamp = datetime.fromisoformat(log['timestamp'].replace('Z', '+00:00'))
+            formatted_date = timestamp.strftime('%d/%m/%Y %H:%M:%S')
+            
+            row = [
+                formatted_date,
+                log['status'],
+                produtos_str,
+                f"{log['execution_time']:.2f}" if log['execution_time'] else '',
+                f"${log['cost']:.4f}" if log['cost'] else '',
+                log['error'] if log['error'] else ''
+            ]
+            rows.append(row)
+
+        # Atualizar planilha
+        body = {
+            'values': header + rows
+        }
+        
+        # Limpar planilha e inserir novos dados
+        sheet = sheets_service.spreadsheets()
+        sheet.values().clear(
+            spreadsheetId=spreadsheet_id,
+            range='A1:Z'
+        ).execute()
+        
+        result = sheet.values().update(
+            spreadsheetId=spreadsheet_id,
+            range='A1',
+            valueInputOption='USER_ENTERED',
+            body=body
+        ).execute()
+
+        # Formatar cabeçalho
+        requests = [{
+            'repeatCell': {
+                'range': {
+                    'sheetId': 0,
+                    'startRowIndex': 0,
+                    'endRowIndex': 1
+                },
+                'cell': {
+                    'userEnteredFormat': {
+                        'backgroundColor': {
+                            'red': 0.2,
+                            'green': 0.2,
+                            'blue': 0.2
+                        },
+                        'textFormat': {
+                            'bold': True,
+                            'foregroundColor': {
+                                'red': 1.0,
+                                'green': 1.0,
+                                'blue': 1.0
+                            }
+                        }
+                    }
+                },
+                'fields': 'userEnteredFormat(backgroundColor,textFormat)'
+            }
+        }]
+
+        sheet.batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={'requests': requests}
+        ).execute()
+
+        return JSONResponse(content={
+            "message": "Logs exportados com sucesso",
+            "rows_updated": len(rows)
+        })
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao exportar logs: {str(e)}")
 
 def save_log(
     status: str,
