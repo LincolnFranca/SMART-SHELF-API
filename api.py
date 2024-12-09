@@ -154,7 +154,7 @@ async def analyze_shelf(
                     'top_p': 0.8,
                     'max_output_tokens': 300,
                 }
-            ),
+            ).async_generate(),
             timeout=120
         )
         
