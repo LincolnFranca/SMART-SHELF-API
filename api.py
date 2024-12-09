@@ -147,14 +147,14 @@ async def analyze_shelf(
         
         # Fazer a análise com timeout aumentado
         response = await asyncio.wait_for(
-            model.generate_content(
+            model.generate_content_async(
                 contents=[PROMPTS['default'], image_parts[0]],
                 generation_config={
                     'temperature': 0.1,
                     'top_p': 0.8,
                     'max_output_tokens': 300,
                 }
-            ).async_generate(),
+            ),
             timeout=120
         )
         
