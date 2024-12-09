@@ -9,6 +9,9 @@ from typing import Literal, List
 from pydantic import BaseModel
 from pathlib import Path
 import json
+from datetime import datetime
+import time
+from supabase import create_client
 
 # Classes para requisição e resposta
 class Produto(BaseModel):
@@ -40,51 +43,51 @@ app.add_middleware(
 genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
 model = genai.GenerativeModel('gemini-1.5-pro-latest')
 
-# Funções auxiliares
-def load_config():
-    config_file = Path('config.json')
-    if config_file.exists():
-        return json.loads(config_file.read_text())
-    return {
-        'cost_per_analysis': 0.0005,
-        'total_analyses': 0,
-        'total_cost': 0.0
-    }
-
-def save_config(config):
-    Path('config.json').write_text(json.dumps(config, indent=2))
+# Configuração Supabase
+supabase = create_client(
+    os.environ.get("SUPABASE_URL", "sua_url"),
+    os.environ.get("SUPABASE_KEY", "sua_key")
+)
 
 @app.post("/analyze", response_model=AnalysisResponse)
 async def analyze_shelf(
     file: UploadFile = File(...),
     produtos: str = Form(...)  # JSON string com lista de produtos
 ):
+    start_time = time.time()
     try:
         # Verificar se o arquivo é uma imagem
         if not file.content_type.startswith("image/"):
+            save_log(status="error", error="Arquivo inválido", produtos=[])
             raise HTTPException(status_code=400, detail="O arquivo deve ser uma imagem")
         
         # Converter string JSON para lista de produtos
-        produtos_list = json.loads(produtos)
+        try:
+            produtos_list = json.loads(produtos)
+        except json.JSONDecodeError as e:
+            save_log(status="error", error="JSON inválido", produtos=[])
+            raise HTTPException(status_code=400, detail="Formato inválido da lista de produtos")
         
         # Validar número de produtos
         if len(produtos_list) > 3:
+            save_log(status="error", error="Limite de produtos excedido", produtos=[p['nome'] for p in produtos_list])
             raise HTTPException(status_code=400, detail="Máximo de 3 produtos permitido")
         
-        # Formatar produtos para o prompt
-        produtos_texto = "\n".join([
-            f"- {p['nome']}: {p['descricao']}"
-            for p in produtos_list
-        ])
+        # Log dos produtos sendo analisados
+        save_log(status="info", produtos=[p['nome'] for p in produtos_list])
         
         # Ler e processar a imagem
         image_data = await file.read()
         image = Image.open(io.BytesIO(image_data))
         
         # Preparar o prompt com os produtos
-        prompt = f"{PROMPTS['default']}\n\nProdutos a serem analisados:\n{produtos_texto}"
+        produtos_texto = "\n".join([
+            f"- {p['nome']}: {p['descricao']}"
+            for p in produtos_list
+        ])
         
         # Realizar análise
+        prompt = f"{PROMPTS['default']}\n\nProdutos a serem analisados:\n{produtos_texto}"
         response = model.generate_content(
             contents=[prompt, image],
             generation_config={
@@ -94,30 +97,81 @@ async def analyze_shelf(
             }
         )
         
-        # Atualizar estatísticas
-        config = load_config()
-        config['total_analyses'] += 1
-        config['total_cost'] += config['cost_per_analysis']
-        save_config(config)
+        execution_time = time.time() - start_time
         
+        # Log da análise bem-sucedida
+        save_log(
+            status="success",
+            produtos=[p['nome'] for p in produtos_list],
+            execution_time=execution_time,
+            cost=0.0005
+        )
+
         return AnalysisResponse(
             analysis=response.text,
-            cost=config['cost_per_analysis'],
-            execution_time=1.2
+            cost=0.0005,
+            execution_time=execution_time
         )
-        
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Formato inválido da lista de produtos")
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        execution_time = time.time() - start_time
+        save_log(
+            status="error",
+            error=str(e),
+            produtos=[p['nome'] for p in produtos_list] if 'produtos_list' in locals() else [],
+            execution_time=execution_time
+        )
+        raise
+
+def save_log(
+    status: str,
+    produtos: list,
+    execution_time: float = 0,
+    cost: float = 0,
+    error: str = None
+):
+    """Salva o log da análise no Supabase"""
+    data = {
+        "timestamp": datetime.utcnow().isoformat(),
+        "status": status,
+        "produtos": produtos,
+        "execution_time": execution_time,
+        "cost": cost,
+        "error": error
+    }
+    supabase.table('analysis_logs').insert(data).execute()
 
 @app.get("/stats")
 async def get_stats():
-    config = load_config()
+    """Retorna estatísticas das análises"""
+    response = supabase.table('analysis_logs').select('*').execute()
+    logs = response.data
+    
+    total = len(logs)
+    successful = len([log for log in logs if log['status'] == 'success'])
+    total_cost = sum(log['cost'] for log in logs if log['status'] == 'success')
+    
+    successful_times = [log['execution_time'] for log in logs if log['status'] == 'success']
+    avg_time = sum(successful_times) / len(successful_times) if successful_times else 0
+    
     return {
-        "total_analyses": config['total_analyses'],
-        "total_cost": config['total_cost']
+        "total_analyses": total,
+        "successful_analyses": successful,
+        "total_cost": total_cost,
+        "average_execution_time": avg_time
     }
+
+@app.get("/logs")
+async def get_logs(limit: int = 10, status: str = None):
+    """Retorna os últimos logs de análise"""
+    query = supabase.table('analysis_logs').select('*')
+    
+    if status:
+        query = query.eq('status', status)
+    
+    response = query.order('timestamp', desc=True).limit(limit).execute()
+    
+    return {"logs": response.data}
 
 if __name__ == "__main__":
     import uvicorn
