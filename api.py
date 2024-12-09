@@ -104,23 +104,30 @@ sheets_service = build('sheets', 'v4', credentials=credentials)
 
 @app.post("/analyze", response_model=AnalysisResponse)
 async def analyze_shelf(
-    image: UploadFile = File(...),
+    image: UploadFile = File(None),
+    file: UploadFile = File(None),
     produtos: str = Form(...)
 ):
     """
     Analisa a imagem da prateleira usando o Google Gemini.
     
-    - image: arquivo de imagem
+    - image/file: arquivo de imagem (pode usar qualquer um dos campos)
     - produtos: string JSON no formato '[{"nome": "Produto 1", "descricao": "Descrição 1"}]'
     """
     print("\n=== Nova Análise Iniciada ===")
-    print(f"Tipo do arquivo: {image.content_type}")
-    print(f"Nome do arquivo: {image.filename}")
+    
+    # Usa o campo 'file' se 'image' não for fornecido
+    upload_file = image if image is not None else file
+    if upload_file is None:
+        raise HTTPException(status_code=400, detail="É necessário enviar uma imagem no campo 'image' ou 'file'")
+    
+    print(f"Tipo do arquivo: {upload_file.content_type}")
+    print(f"Nome do arquivo: {upload_file.filename}")
     
     start_time = time.time()
     try:
         # Ler a imagem uma única vez
-        image_data = await image.read()
+        image_data = await upload_file.read()
         print(f"Tamanho do arquivo: {len(image_data)} bytes")
         
         # Validar produtos
