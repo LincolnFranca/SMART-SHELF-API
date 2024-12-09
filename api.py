@@ -246,23 +246,22 @@ async def export_to_sheets(spreadsheet_id: str = Query(..., description="ID da p
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao exportar logs: {str(e)}")
 
-def save_log(
-    status: str,
-    produtos: list,
-    execution_time: float = 0,
-    cost: float = 0,
-    error: str = None
-):
+def save_log(status: str, produtos: list, execution_time: float = 0, cost: float = 0, error: str = None):
     """Salva o log da análise no Supabase"""
     data = {
-        "timestamp": datetime.utcnow().isoformat(),
         "status": status,
-        "produtos": produtos,
+        "produtos": json.dumps(produtos),
         "execution_time": execution_time,
-        "cost": cost,
-        "error": error
+        "cost": cost
     }
-    supabase.table('analysis_logs').insert(data).execute()
+    
+    if error:
+        data["error"] = error
+    
+    try:
+        supabase.table('analysis_logs').insert(data).execute()
+    except Exception as e:
+        print(f"Erro ao salvar log: {str(e)}")
 
 @app.get("/stats")
 async def get_stats():
