@@ -89,6 +89,22 @@ async def analyze_shelf(
     - image: arquivo de imagem
     - produtos: string JSON no formato '[{"nome": "Produto 1", "descricao": "Descrição 1"}]'
     """
+    print("\n=== Dados Recebidos ===")
+    print(f"Tipo do arquivo: {image.content_type}")
+    print(f"Nome do arquivo: {image.filename}")
+    print(f"Tamanho do arquivo: {len(await image.read())} bytes")
+    # Retornar o cursor para o início do arquivo após ler
+    await image.seek(0)
+    
+    print("\nProdutos recebidos (raw):", produtos)
+    try:
+        produtos_parsed = json.loads(produtos)
+        print("\nProdutos parseados:", json.dumps(produtos_parsed, indent=2, ensure_ascii=False))
+    except Exception as e:
+        print("\nErro ao parsear produtos:", str(e))
+    
+    print("\n=== Fim dos Dados ===\n")
+    
     start_time = time.time()
     try:
         # Verificar se o arquivo é uma imagem
