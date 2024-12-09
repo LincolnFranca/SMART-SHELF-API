@@ -203,13 +203,16 @@ async def analyze_shelf(
         }
         
         # Log do resultado
-        save_log(
-            status=status,
-            produtos=[p['nome'] for p in produtos_list],
-            execution_time=result["execution_time"],
-            cost=result["cost"],
-            analysis_details=details
-        )
+        try:
+            save_log(
+                status=status,
+                produtos=[p['nome'] for p in produtos_list],
+                execution_time=result["execution_time"],
+                cost=result["cost"],
+                analysis_details=details
+            )
+        except Exception as e:
+            print(f"\nErro ao salvar log: {str(e)}")
         
         print("\n=== Análise Concluída ===")
         return result
@@ -218,33 +221,47 @@ async def analyze_shelf(
         error_msg = f"Erro durante a análise: {str(e)}"
         print(f"\nERRO: {error_msg}")
         
-        save_log(
-            status="error",
-            produtos=[],
-            error=error_msg,
-            analysis_details="Erro durante a análise"
-        )
+        try:
+            save_log(
+                status="error",
+                produtos=[],
+                error=error_msg,
+                analysis_details={"status": "error", "error": str(e)}
+            )
+        except Exception as log_error:
+            print(f"\nErro ao salvar log de erro: {str(log_error)}")
         
         raise HTTPException(status_code=500, detail=error_msg)
 
 def save_log(status: str, produtos: list, execution_time: float = 0, cost: float = 0, error: str = None, analysis_details: dict = None):
     """Salva o log da análise no Supabase"""
-    data = {
-        "status": status,
-        "produtos": json.dumps(produtos),
-        "execution_time": execution_time,
-        "cost": cost,
-        "analysis_details": json.dumps(analysis_details) if analysis_details else None
-    }
-    
-    if error:
-        data["error"] = error
-    
     try:
-        print(f"Tentando salvar log: {data}")
-        supabase.table('analysis_logs').insert(data).execute()
+        # Garantir que analysis_details seja um JSON válido
+        if analysis_details:
+            if isinstance(analysis_details, dict):
+                analysis_details = json.dumps(analysis_details)
+            elif isinstance(analysis_details, str):
+                # Verifica se já é um JSON válido
+                json.loads(analysis_details)
+            else:
+                analysis_details = None
+        
+        data = {
+            "status": status,
+            "produtos": json.dumps(produtos),
+            "execution_time": execution_time,
+            "cost": cost,
+            "error": error,
+            "analysis_details": analysis_details
+        }
+        
+        print("\nTentando salvar log:", json.dumps(data, ensure_ascii=False))
+        supabase.table("analysis_logs").insert(data).execute()
+        print("Log salvo com sucesso")
+        
     except Exception as e:
-        print(f"Erro ao salvar log: {str(e)}")
+        print(f"\nErro ao salvar no Supabase: {str(e)}")
+        # Não propaga o erro para não afetar a resposta da API
 
 @app.post("/export-to-sheets", response_model=dict)
 async def export_to_sheets(spreadsheet_id: str = Query(..., description="ID da planilha do Google Sheets para exportar os logs")):
