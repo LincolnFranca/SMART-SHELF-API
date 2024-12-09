@@ -16,6 +16,7 @@ from google.oauth2.credentials import Credentials
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from fastapi.responses import JSONResponse
+import asyncio
 
 # Classes para requisição e resposta
 class Produto(BaseModel):
@@ -78,13 +79,13 @@ sheets_service = build('sheets', 'v4', credentials=credentials)
 
 @app.post("/analyze", response_model=AnalysisResponse)
 async def analyze_shelf(
-    file: UploadFile = File(...),
+    image: UploadFile = File(...),
     produtos: str = Form(...)  # JSON string com lista de produtos
 ):
     start_time = time.time()
     try:
         # Verificar se o arquivo é uma imagem
-        if not file.content_type.startswith("image/"):
+        if not image.content_type.startswith("image/"):
             save_log(status="error", error="Arquivo inválido", produtos=[])
             raise HTTPException(status_code=400, detail="O arquivo deve ser uma imagem")
         
@@ -103,52 +104,87 @@ async def analyze_shelf(
         # Log dos produtos sendo analisados
         save_log(status="info", produtos=[p['nome'] for p in produtos_list])
         
-        # Ler e processar a imagem
-        image_data = await file.read()
-        image = Image.open(io.BytesIO(image_data))
+        # Ler a imagem
+        image_data = await image.read()
         
-        # Preparar o prompt com os produtos
-        produtos_texto = "\n".join([
-            f"- {p['nome']}: {p['descricao']}"
-            for p in produtos_list
-        ])
+        # Preparar a imagem para o Gemini
+        image_parts = [{"mime_type": "image/jpeg", "data": image_data}]
         
-        # Realizar análise
-        prompt = f"{PROMPTS['default']}\n\nProdutos a serem analisados:\n{produtos_texto}"
-        response = model.generate_content(
-            contents=[prompt, image],
-            generation_config={
-                'temperature': 0.1,
-                'top_p': 0.8,
-                'max_output_tokens': 300,
-            }
+        # Fazer a análise com timeout aumentado
+        response = await asyncio.wait_for(
+            model.generate_content(
+                contents=[PROMPTS['default'], image_parts[0]],
+                generation_config={
+                    'temperature': 0.1,
+                    'top_p': 0.8,
+                    'max_output_tokens': 300,
+                }
+            ),
+            timeout=120
         )
         
-        execution_time = time.time() - start_time
+        # Extrair os detalhes da análise
+        response_text = response.text
         
-        # Log da análise bem-sucedida
+        # Determinar status e detalhes
+        if "Validada com sucesso" in response_text:
+            status = "success"
+            # Extrair o texto após "Motivos:" até o final
+            details = response_text.split("Motivos:")[1].strip()
+        else:
+            status = "pending"
+            # Extrair problemas encontrados e sugestões
+            problems = response_text.split("Problemas encontrados:")[1].split("Sugestões de melhoria:")[0].strip()
+            suggestions = response_text.split("Sugestões de melhoria:")[1].strip()
+            details = f"Problemas: {problems}\nSugestões: {suggestions}"
+        
+        execution_time = time.time() - start_time
+        cost = 0.0005  # Custo fixo por análise
+        
+        # Salvar log com os detalhes
         save_log(
-            status="success",
+            status=status,
             produtos=[p['nome'] for p in produtos_list],
             execution_time=execution_time,
-            cost=0.0005
+            cost=cost,
+            analysis_details=details
         )
-
-        return AnalysisResponse(
-            analysis=response.text,
-            cost=0.0005,
-            execution_time=execution_time
-        )
-
+        
+        return {
+            "status": status,
+            "details": details,
+            "execution_time": execution_time,
+            "cost": cost
+        }
+        
     except Exception as e:
-        execution_time = time.time() - start_time
+        error_msg = str(e)
         save_log(
             status="error",
-            error=str(e),
-            produtos=[p['nome'] for p in produtos_list] if 'produtos_list' in locals() else [],
-            execution_time=execution_time
+            produtos=[],
+            error=error_msg,
+            analysis_details="Erro durante a análise"
         )
-        raise
+        raise HTTPException(status_code=500, detail=error_msg)
+
+def save_log(status: str, produtos: list, execution_time: float = 0, cost: float = 0, error: str = None, analysis_details: str = None):
+    """Salva o log da análise no Supabase"""
+    data = {
+        "status": status,
+        "produtos": json.dumps(produtos),
+        "execution_time": execution_time,
+        "cost": cost,
+        "analysis_details": analysis_details
+    }
+    
+    if error:
+        data["error"] = error
+    
+    try:
+        print(f"Tentando salvar log: {data}")
+        supabase.table('analysis_logs').insert(data).execute()
+    except Exception as e:
+        print(f"Erro ao salvar log: {str(e)}")
 
 @app.post("/export-to-sheets", response_model=dict)
 async def export_to_sheets(spreadsheet_id: str = Query(..., description="ID da planilha do Google Sheets para exportar os logs")):
@@ -243,23 +279,6 @@ async def export_to_sheets(spreadsheet_id: str = Query(..., description="ID da p
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao exportar logs: {str(e)}")
-
-def save_log(status: str, produtos: list, execution_time: float = 0, cost: float = 0, error: str = None):
-    """Salva o log da análise no Supabase"""
-    data = {
-        "status": status,
-        "produtos": json.dumps(produtos),
-        "execution_time": execution_time,
-        "cost": cost
-    }
-    
-    if error:
-        data["error"] = error
-    
-    try:
-        supabase.table('analysis_logs').insert(data).execute()
-    except Exception as e:
-        print(f"Erro ao salvar log: {str(e)}")
 
 @app.get("/stats")
 async def get_stats():
