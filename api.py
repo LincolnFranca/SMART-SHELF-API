@@ -24,9 +24,16 @@ class Produto(BaseModel):
     nome: str
     descricao: str
 
+class ValidationResult(BaseModel):
+    nome_marca: bool
+    preco: bool
+    posicionamento: bool
+    organizacao: bool
+
 class AnalysisResponse(BaseModel):
     status: str
-    details: dict
+    details: str
+    validation: ValidationResult
     execution_time: float
     cost: float
 
@@ -173,31 +180,29 @@ async def analyze_shelf(
         response_text = response.text
         print("\nResposta do Gemini:", response_text)
         
+        # Extrair resultados da validação
+        validation_text = response_text.split("Validação dos critérios:")[1].split("Dicas para melhoria:" if "Dicas para melhoria:" in response_text else "Motivos da aprovação:")[0].strip()
+        
+        # Processar cada critério
+        validation_result = ValidationResult(
+            nome_marca="Nome/marca: Verdadeiro" in validation_text,
+            preco="Etiqueta de preço: Verdadeiro" in validation_text,
+            posicionamento="Posicionamento: Verdadeiro" in validation_text,
+            organizacao="Organização: Verdadeiro" in validation_text
+        )
+        
         if "Validada com sucesso" in response_text:
             status = "success"
-            validation_text = response_text.split("Validação dos critérios:")[1].split("Motivos da aprovação:")[0].strip()
-            details_text = response_text.split("Motivos da aprovação:")[1].strip()
-            details = {
-                "status": "success",
-                "validation": validation_text,
-                "details": details_text,
-                "raw_response": response_text
-            }
+            details = response_text.split("Motivos da aprovação:")[1].strip()
         else:
             status = "pending"
-            validation_text = response_text.split("Validação dos critérios:")[1].split("Dicas para melhoria:")[0].strip()
-            tips = response_text.split("Dicas para melhoria:")[1].strip()
-            details = {
-                "status": "pending",
-                "validation": validation_text,
-                "improvements": tips,
-                "raw_response": response_text
-            }
+            details = response_text.split("Dicas para melhoria:")[1].strip()
         
         # Preparar resposta
         result = {
             "status": status,
             "details": details,
+            "validation": validation_result,
             "execution_time": time.time() - start_time,
             "cost": 0.0005
         }
@@ -209,7 +214,8 @@ async def analyze_shelf(
                 produtos=[p['nome'] for p in produtos_list],
                 execution_time=result["execution_time"],
                 cost=result["cost"],
-                analysis_details=details
+                analysis_details=details,
+                validation_result=validation_result
             )
         except Exception as e:
             print(f"\nErro ao salvar log: {str(e)}")
@@ -233,35 +239,37 @@ async def analyze_shelf(
         
         raise HTTPException(status_code=500, detail=error_msg)
 
-def save_log(status: str, produtos: list, execution_time: float = 0, cost: float = 0, error: str = None, analysis_details: dict = None):
+def save_log(status: str, produtos: list, execution_time: float = 0, cost: float = 0, 
+            error: str = None, analysis_details: str = None, validation_result: ValidationResult = None):
     """Salva o log da análise no Supabase"""
     try:
-        # Garantir que analysis_details seja um JSON válido
-        if analysis_details:
-            if isinstance(analysis_details, dict):
-                analysis_details = json.dumps(analysis_details)
-            elif isinstance(analysis_details, str):
-                # Verifica se já é um JSON válido
-                json.loads(analysis_details)
-            else:
-                analysis_details = None
-        
-        data = {
+        # Preparar dados para o log
+        log_data = {
             "status": status,
             "produtos": json.dumps(produtos),
             "execution_time": execution_time,
             "cost": cost,
             "error": error,
-            "analysis_details": analysis_details
+            "analysis_details": analysis_details,
+            "validation": {
+                "nome_marca": validation_result.nome_marca if validation_result else None,
+                "preco": validation_result.preco if validation_result else None,
+                "posicionamento": validation_result.posicionamento if validation_result else None,
+                "organizacao": validation_result.organizacao if validation_result else None
+            } if validation_result else None,
+            "created_at": datetime.now().isoformat()
         }
-        
-        print("\nTentando salvar log:", json.dumps(data, ensure_ascii=False))
-        supabase.table("analysis_logs").insert(data).execute()
-        print("Log salvo com sucesso")
-        
+
+        # Remover campos None
+        log_data = {k: v for k, v in log_data.items() if v is not None}
+
+        # Salvar no Supabase
+        supabase.table("logs").insert(log_data).execute()
+        print("\nLog salvo com sucesso!")
+
     except Exception as e:
-        print(f"\nErro ao salvar no Supabase: {str(e)}")
-        # Não propaga o erro para não afetar a resposta da API
+        print(f"\nErro ao salvar log no Supabase: {str(e)}")
+        raise
 
 @app.post("/export-to-sheets", response_model=dict)
 async def export_to_sheets(spreadsheet_id: str = Query(..., description="ID da planilha do Google Sheets para exportar os logs")):
@@ -276,7 +284,7 @@ async def export_to_sheets(spreadsheet_id: str = Query(..., description="ID da p
     """
     try:
         # Buscar logs do Supabase
-        response = supabase.table('analysis_logs').select('*').order('id', desc=True).execute()
+        response = supabase.table('logs').select('*').order('id', desc=True).execute()
         logs = response.data
 
         # Preparar dados para a planilha
@@ -360,7 +368,7 @@ async def export_to_sheets(spreadsheet_id: str = Query(..., description="ID da p
 @app.get("/stats")
 async def get_stats():
     """Retorna estatísticas das análises"""
-    response = supabase.table('analysis_logs').select('*').execute()
+    response = supabase.table('logs').select('*').execute()
     logs = response.data
     
     total = len(logs)
@@ -381,7 +389,7 @@ async def get_stats():
 async def get_logs(limit: int = 10):
     """Retorna os últimos logs de análise"""
     try:
-        query = supabase.table('analysis_logs').select('*')
+        query = supabase.table('logs').select('*')
         response = query.order('id', desc=True).limit(limit).execute()
         logs = response.data
 
