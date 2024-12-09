@@ -93,9 +93,16 @@ async def analyze_shelf(
         # Converter string JSON para lista de produtos
         try:
             produtos_list = json.loads(produtos)
+            # Validar estrutura dos produtos
+            for produto in produtos_list:
+                if not isinstance(produto, dict) or 'nome' not in produto or 'descricao' not in produto:
+                    raise ValueError("Cada produto deve ter 'nome' e 'descricao'")
         except json.JSONDecodeError as e:
             save_log(status="error", error="JSON inválido", produtos=[])
             raise HTTPException(status_code=400, detail="Formato inválido da lista de produtos")
+        except ValueError as e:
+            save_log(status="error", error=str(e), produtos=[])
+            raise HTTPException(status_code=400, detail=str(e))
         
         # Validar número de produtos
         if len(produtos_list) > 3:
@@ -127,17 +134,33 @@ async def analyze_shelf(
         # Extrair os detalhes da análise
         response_text = response.text
         
-        # Determinar status e detalhes
-        if "Validada com sucesso" in response_text:
-            status = "success"
-            # Extrair o texto após "Motivos da aprovação:" até a próxima linha em branco
-            details = response_text.split("Motivos da aprovação:")[1].strip()
-        else:
-            status = "pending"
-            # Extrair validação dos critérios e dicas
-            validation = response_text.split("Validação dos critérios:")[1].split("Dicas para melhoria:")[0].strip()
-            tips = response_text.split("Dicas para melhoria:")[1].strip()
-            details = f"Validação:\n{validation}\n\nMelhorias necessárias:\n{tips}"
+        try:
+            # Determinar status e detalhes
+            if "Validada com sucesso" in response_text:
+                status = "success"
+                # Extrair o texto após "Motivos da aprovação:" até o final
+                if "Motivos da aprovação:" in response_text:
+                    details = response_text.split("Motivos da aprovação:")[1].strip()
+                else:
+                    details = "Análise aprovada sem detalhes específicos"
+            else:
+                status = "pending"
+                # Extrair validação dos critérios e dicas com tratamento de erro
+                try:
+                    validation = response_text.split("Validação dos critérios:")[1].split("Dicas para melhoria:")[0].strip()
+                    tips = response_text.split("Dicas para melhoria:")[1].strip()
+                    details = f"Validação:\n{validation}\n\nMelhorias necessárias:\n{tips}"
+                except IndexError:
+                    details = response_text  # Fallback para o texto completo se não conseguir extrair as partes
+        except Exception as e:
+            error_msg = str(e)
+            save_log(
+                status="error",
+                produtos=[],
+                error=error_msg,
+                analysis_details="Erro durante a análise"
+            )
+            raise HTTPException(status_code=500, detail=error_msg)
         
         execution_time = time.time() - start_time
         cost = 0.0005  # Custo fixo por análise
