@@ -40,20 +40,24 @@ app = FastAPI(
 # Handler para erros de validação
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handler para erros de validação"""
+    error_details = {
+        "detail": exc.errors(),
+        "headers": dict(request.headers),
+        "method": request.method,
+        "url": str(request.url)
+    }
+    
     print("\n=== Erro de Validação ===")
     print(f"URL: {request.url}")
     print(f"Método: {request.method}")
     print("Headers:", dict(request.headers))
     print("Detalhes do erro:", exc.errors())
-    print("Corpo da requisição:", await request.body())
     print("=== Fim do Erro ===\n")
     
     return JSONResponse(
         status_code=422,
-        content={
-            "detail": exc.errors(),
-            "body": str(await request.body())
-        }
+        content=error_details
     )
 
 # Configuração CORS
@@ -100,9 +104,8 @@ sheets_service = build('sheets', 'v4', credentials=credentials)
 
 @app.post("/analyze", response_model=AnalysisResponse)
 async def analyze_shelf(
-    request: Request,
     image: UploadFile = File(...),
-    produtos: str = Form(...)  # JSON string com lista de produtos
+    produtos: str = Form(...)
 ):
     """
     Analisa a imagem da prateleira usando o Google Gemini.
@@ -110,68 +113,34 @@ async def analyze_shelf(
     - image: arquivo de imagem
     - produtos: string JSON no formato '[{"nome": "Produto 1", "descricao": "Descrição 1"}]'
     """
-    print("\n=== Dados da Requisição ===")
-    print(f"URL: {request.url}")
-    print(f"Método: {request.method}")
-    print("Headers:", dict(request.headers))
-    print("Body:", await request.body())
-    
-    print("\n=== Dados do Arquivo ===")
+    print("\n=== Nova Análise Iniciada ===")
     print(f"Tipo do arquivo: {image.content_type}")
     print(f"Nome do arquivo: {image.filename}")
-    print(f"Tamanho do arquivo: {len(await image.read())} bytes")
-    # Retornar o cursor para o início do arquivo após ler
-    await image.seek(0)
-    
-    print("\n=== Dados dos Produtos ===")
-    print("Produtos (raw):", produtos)
-    try:
-        produtos_parsed = json.loads(produtos)
-        print("Produtos (parsed):", json.dumps(produtos_parsed, indent=2, ensure_ascii=False))
-    except Exception as e:
-        print("Erro ao parsear produtos:", str(e))
-    
-    print("\n=== Fim dos Dados ===\n")
     
     start_time = time.time()
     try:
-        # Verificar se o arquivo é uma imagem
-        if not image.content_type.startswith("image/"):
-            save_log(status="error", error="Arquivo inválido", produtos=[])
-            raise HTTPException(status_code=400, detail="O arquivo deve ser uma imagem")
+        # Ler a imagem uma única vez
+        image_data = await image.read()
+        print(f"Tamanho do arquivo: {len(image_data)} bytes")
         
-        # Converter string JSON para lista de produtos
+        # Validar produtos
         try:
             produtos_list = json.loads(produtos)
+            print("\nProdutos recebidos:", json.dumps(produtos_list, indent=2, ensure_ascii=False))
+            
             if not isinstance(produtos_list, list):
                 raise ValueError("O campo 'produtos' deve ser uma lista")
-                
-            # Validar estrutura dos produtos
+            
             for produto in produtos_list:
                 if not isinstance(produto, dict):
                     raise ValueError("Cada produto deve ser um objeto")
                 if 'nome' not in produto or 'descricao' not in produto:
                     raise ValueError("Cada produto deve ter 'nome' e 'descricao'")
-                if not isinstance(produto['nome'], str) or not isinstance(produto['descricao'], str):
-                    raise ValueError("'nome' e 'descricao' devem ser strings")
                 
         except json.JSONDecodeError:
-            save_log(status="error", error="JSON inválido", produtos=[])
             raise HTTPException(status_code=400, detail="Formato inválido da lista de produtos")
         except ValueError as e:
-            save_log(status="error", error=str(e), produtos=[])
             raise HTTPException(status_code=400, detail=str(e))
-        
-        # Validar número de produtos
-        if len(produtos_list) > 3:
-            save_log(status="error", error="Limite de produtos excedido", produtos=[p['nome'] for p in produtos_list])
-            raise HTTPException(status_code=400, detail="Máximo de 3 produtos permitido")
-        
-        # Log dos produtos sendo analisados
-        save_log(status="info", produtos=[p['nome'] for p in produtos_list])
-        
-        # Ler a imagem
-        image_data = await image.read()
         
         # Preparar a imagem para o Gemini
         image_parts = [{"mime_type": "image/jpeg", "data": image_data}]
@@ -189,65 +158,50 @@ async def analyze_shelf(
             timeout=120
         )
         
-        # Extrair os detalhes da análise
+        # Processar resposta
         response_text = response.text
+        print("\nResposta do Gemini:", response_text)
         
-        try:
-            # Determinar status e detalhes
-            if "Validada com sucesso" in response_text:
-                status = "success"
-                # Extrair o texto após "Motivos da aprovação:" até o final
-                if "Motivos da aprovação:" in response_text:
-                    details = response_text.split("Motivos da aprovação:")[1].strip()
-                else:
-                    details = "Análise aprovada sem detalhes específicos"
-            else:
-                status = "pending"
-                # Extrair validação dos critérios e dicas com tratamento de erro
-                try:
-                    validation = response_text.split("Validação dos critérios:")[1].split("Dicas para melhoria:")[0].strip()
-                    tips = response_text.split("Dicas para melhoria:")[1].strip()
-                    details = f"Validação:\n{validation}\n\nMelhorias necessárias:\n{tips}"
-                except IndexError:
-                    details = response_text  # Fallback para o texto completo se não conseguir extrair as partes
-                    
-            # Preparar resposta
-            response_data = {
-                "status": status,
-                "details": details,
-                "execution_time": time.time() - start_time,
-                "cost": 0.0005
-            }
-            
-            # Salvar log
-            save_log(
-                status=status,
-                produtos=[p['nome'] for p in produtos_list],
-                execution_time=response_data["execution_time"],
-                cost=response_data["cost"],
-                analysis_details=details
-            )
-            
-            return response_data
-            
-        except Exception as e:
-            error_msg = f"Erro ao processar resposta: {str(e)}"
-            save_log(
-                status="error",
-                produtos=[p['nome'] for p in produtos_list],
-                error=error_msg,
-                analysis_details="Erro durante o processamento da análise"
-            )
-            raise HTTPException(status_code=500, detail=error_msg)
-            
+        if "Validada com sucesso" in response_text:
+            status = "success"
+            details = response_text.split("Motivos da aprovação:")[1].strip() if "Motivos da aprovação:" in response_text else "Análise aprovada"
+        else:
+            status = "pending"
+            validation = response_text.split("Validação dos critérios:")[1].split("Dicas para melhoria:")[0].strip()
+            tips = response_text.split("Dicas para melhoria:")[1].strip()
+            details = f"Validação:\n{validation}\n\nMelhorias necessárias:\n{tips}"
+        
+        # Preparar resposta
+        result = {
+            "status": status,
+            "details": details,
+            "execution_time": time.time() - start_time,
+            "cost": 0.0005
+        }
+        
+        # Log do resultado
+        save_log(
+            status=status,
+            produtos=[p['nome'] for p in produtos_list],
+            execution_time=result["execution_time"],
+            cost=result["cost"],
+            analysis_details=details
+        )
+        
+        print("\n=== Análise Concluída ===")
+        return result
+        
     except Exception as e:
-        error_msg = str(e)
+        error_msg = f"Erro durante a análise: {str(e)}"
+        print(f"\nERRO: {error_msg}")
+        
         save_log(
             status="error",
             produtos=[],
             error=error_msg,
             analysis_details="Erro durante a análise"
         )
+        
         raise HTTPException(status_code=500, detail=error_msg)
 
 def save_log(status: str, produtos: list, execution_time: float = 0, cost: float = 0, error: str = None, analysis_details: str = None):
